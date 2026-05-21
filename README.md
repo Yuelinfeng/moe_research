@@ -83,6 +83,20 @@ powershell -ExecutionPolicy Bypass -File scripts/local_push_run_fetch.ps1 `
   -Config configs/remote.local.json
 ```
 
+The default experiment is a short Hugging Face MoE inference baseline for
+`Qwen/Qwen1.5-MoE-A2.7B-Chat`. It records environment checks, `nvidia-smi`,
+latency, token throughput, and peak CUDA memory. It intentionally aborts before
+model download when CUDA is not visible to PyTorch.
+
+Useful overrides:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/local_push_run_fetch.ps1 `
+  -Config configs/remote.local.json `
+  -RunLabel qwen_moe_baseline `
+  -RunCommand 'MODEL_ID=Qwen/Qwen1.5-MoE-A2.7B-Chat MAX_NEW_TOKENS=32 bash experiments/run_baseline.sh --output-dir "$RUN_DIR"'
+```
+
 If the target local repo has uncommitted changes and you want the script to
 commit them before pushing:
 

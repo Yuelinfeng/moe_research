@@ -17,7 +17,7 @@
     "branch": "main"
   },
   "experiment": {
-    "runLabel": "smoke",
-    "runCommand": "if [[ -x experiments/run_baseline.sh ]]; then bash experiments/run_baseline.sh --output-dir \"$RUN_DIR\"; elif [[ -f experiments/run_baseline.sh ]]; then bash experiments/run_baseline.sh --output-dir \"$RUN_DIR\"; else git status --short > \"$RUN_DIR/repo_status.txt\"; find . -maxdepth 3 -type f | sort > \"$RUN_DIR/repo_files.txt\"; echo \"No experiment entrypoint configured; wrote repo inventory.\"; fi"
+    "runLabel": "qwen_moe_baseline",
+    "runCommand": "bash experiments/run_baseline.sh --output-dir \"$RUN_DIR\""
   }
 }
