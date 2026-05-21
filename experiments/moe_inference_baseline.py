@@ -158,8 +158,7 @@ def run_synthetic_benchmark(args: argparse.Namespace, output_dir: Path, env: dic
                 high=args.synthetic_vocab_size,
                 size=(args.synthetic_batch_size, args.synthetic_seq_len),
                 generator=generator,
-                device=device,
-            )
+            ).to(device)
             prompt_tokens = int(input_ids.shape[-1])
             repeats = args.warmup_iters + args.benchmark_iters
             for rep in range(repeats):
@@ -346,13 +345,24 @@ def main() -> int:
     prompts = load_prompts(args.prompt_file)
 
     load_start = time.perf_counter()
-    tokenizer = tokenizer_cls.from_pretrained(args.model_id, trust_remote_code=True)
-    model = model_cls.from_pretrained(
-        args.model_id,
-        torch_dtype=torch_dtype,
-        trust_remote_code=True,
-        low_cpu_mem_usage=True,
-    )
+    try:
+        tokenizer = tokenizer_cls.from_pretrained(args.model_id, trust_remote_code=True)
+        model = model_cls.from_pretrained(
+            args.model_id,
+            torch_dtype=torch_dtype,
+            trust_remote_code=True,
+            low_cpu_mem_usage=True,
+        )
+    except Exception as exc:
+        write_json(
+            args.output_dir / "error.json",
+            {
+                "stage": "load_hf_model",
+                "model_id": args.model_id,
+                "error": repr(exc),
+            },
+        )
+        return 44
     model.to(device)
     model.eval()
     load_seconds = time.perf_counter() - load_start

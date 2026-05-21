@@ -17,7 +17,7 @@
     "branch": "main"
   },
   "experiment": {
-    "runLabel": "synthetic_moe_baseline",
-    "runCommand": "bash experiments/run_baseline.sh --output-dir \"$RUN_DIR\""
+    "runLabel": "qwen_moe_baseline",
+    "runCommand": "HF_ENDPOINT=https://hf-mirror.com BASELINE_MODE=hf MODEL_ID=Qwen/Qwen1.5-MoE-A2.7B-Chat MAX_NEW_TOKENS=32 bash experiments/run_baseline.sh --output-dir \"$RUN_DIR\""
   }
 }

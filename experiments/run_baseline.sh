@@ -40,6 +40,7 @@ if [[ -z "$PYTHON_BIN" ]]; then
 fi
 
 export HF_HOME="${HF_HOME:-/root/autodl-tmp/hf-cache}"
+export HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
 export HF_HUB_CACHE="${HF_HUB_CACHE:-${HF_HOME}/hub}"
 export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-${HF_HOME}/transformers}"
 export PIP_CACHE_DIR="${PIP_CACHE_DIR:-/root/autodl-tmp/pip-cache}"
@@ -48,8 +49,9 @@ mkdir -p "$HF_HOME" "$HF_HUB_CACHE" "$TRANSFORMERS_CACHE" "$PIP_CACHE_DIR" "$TMP
 
 {
   echo "python=$PYTHON_BIN"
-  echo "baseline_mode=${BASELINE_MODE:-synthetic}"
-  echo "model_id=${MODEL_ID:-synthetic_tiny_moe}"
+  echo "baseline_mode=${BASELINE_MODE:-hf}"
+  echo "model_id=${MODEL_ID:-Qwen/Qwen1.5-MoE-A2.7B-Chat}"
+  echo "hf_endpoint=${HF_ENDPOINT:-https://hf-mirror.com}"
   echo "require_cuda=${MOE_REQUIRE_CUDA:-1}"
   echo "hf_home=$HF_HOME"
   echo "tmpdir=$TMPDIR"
@@ -63,8 +65,8 @@ fi
 
 "$PYTHON_BIN" "$ROOT/experiments/moe_inference_baseline.py" \
   --output-dir "$OUTPUT_DIR" \
-  --mode "${BASELINE_MODE:-synthetic}" \
-  --model-id "${MODEL_ID:-synthetic_tiny_moe}" \
+  --mode "${BASELINE_MODE:-hf}" \
+  --model-id "${MODEL_ID:-Qwen/Qwen1.5-MoE-A2.7B-Chat}" \
   --max-new-tokens "${MAX_NEW_TOKENS:-32}" \
   --warmup-iters "${WARMUP_ITERS:-1}" \
   --benchmark-iters "${BENCHMARK_ITERS:-3}" \
