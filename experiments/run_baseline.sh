@@ -48,7 +48,8 @@ mkdir -p "$HF_HOME" "$HF_HUB_CACHE" "$TRANSFORMERS_CACHE" "$PIP_CACHE_DIR" "$TMP
 
 {
   echo "python=$PYTHON_BIN"
-  echo "model_id=${MODEL_ID:-Qwen/Qwen1.5-MoE-A2.7B-Chat}"
+  echo "baseline_mode=${BASELINE_MODE:-synthetic}"
+  echo "model_id=${MODEL_ID:-synthetic_tiny_moe}"
   echo "require_cuda=${MOE_REQUIRE_CUDA:-1}"
   echo "hf_home=$HF_HOME"
   echo "tmpdir=$TMPDIR"
@@ -62,9 +63,18 @@ fi
 
 "$PYTHON_BIN" "$ROOT/experiments/moe_inference_baseline.py" \
   --output-dir "$OUTPUT_DIR" \
-  --model-id "${MODEL_ID:-Qwen/Qwen1.5-MoE-A2.7B-Chat}" \
+  --mode "${BASELINE_MODE:-synthetic}" \
+  --model-id "${MODEL_ID:-synthetic_tiny_moe}" \
   --max-new-tokens "${MAX_NEW_TOKENS:-32}" \
   --warmup-iters "${WARMUP_ITERS:-1}" \
   --benchmark-iters "${BENCHMARK_ITERS:-3}" \
   --dtype "${MODEL_DTYPE:-float16}" \
-  --require-cuda "${MOE_REQUIRE_CUDA:-1}"
+  --require-cuda "${MOE_REQUIRE_CUDA:-1}" \
+  --synthetic-batch-size "${SYNTHETIC_BATCH_SIZE:-1}" \
+  --synthetic-seq-len "${SYNTHETIC_SEQ_LEN:-64}" \
+  --synthetic-vocab-size "${SYNTHETIC_VOCAB_SIZE:-2048}" \
+  --synthetic-hidden-size "${SYNTHETIC_HIDDEN_SIZE:-256}" \
+  --synthetic-intermediate-size "${SYNTHETIC_INTERMEDIATE_SIZE:-512}" \
+  --synthetic-num-layers "${SYNTHETIC_NUM_LAYERS:-4}" \
+  --synthetic-num-experts "${SYNTHETIC_NUM_EXPERTS:-8}" \
+  --synthetic-top-k "${SYNTHETIC_TOP_K:-2}"

@@ -13,6 +13,10 @@ import time
 from pathlib import Path
 from typing import Any
 
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
 
 DEFAULT_PROMPTS = [
     "Explain why expert routing can become a bottleneck in MoE inference.",
@@ -37,31 +41,207 @@ def run_command(command: list[str]) -> dict[str, Any]:
         return {"error": repr(exc)}
 
 
-def import_or_fail(output_dir: Path):
-    missing = []
+def import_torch_only(output_dir: Path):
     try:
         import torch  # type: ignore
+        import torch.nn as nn  # type: ignore
+        import torch.nn.functional as F  # type: ignore
     except Exception as exc:
         write_json(output_dir / "error.json", {"stage": "import_torch", "error": repr(exc)})
         raise SystemExit(41) from exc
+    return torch, nn, F
 
-    try:
-        from transformers import AutoModelForCausalLM, AutoTokenizer  # type: ignore
-    except Exception:
-        missing.append("transformers")
 
-    if missing:
-        write_json(
-            output_dir / "error.json",
-            {
-                "stage": "import_dependencies",
-                "missing": missing,
-                "hint": "Use the /root/miniconda3/envs/deepseek_moe environment or install transformers.",
-            },
+class TinyMoELayer(nn.Module):
+    def __init__(self, hidden_size: int, intermediate_size: int, num_experts: int, top_k: int) -> None:
+        super().__init__()
+        self.router = nn.Linear(hidden_size, num_experts, bias=False)
+        self.experts = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.Linear(hidden_size, intermediate_size, bias=False),
+                    nn.GELU(),
+                    nn.Linear(intermediate_size, hidden_size, bias=False),
+                )
+                for _ in range(num_experts)
+            ]
         )
-        raise SystemExit(42)
+        self.pre_norm = nn.LayerNorm(hidden_size)
+        self.post_norm = nn.LayerNorm(hidden_size)
+        self.num_experts = num_experts
+        self.top_k = top_k
 
-    return torch, AutoModelForCausalLM, AutoTokenizer
+    def forward(self, hidden: torch.Tensor) -> tuple[torch.Tensor, dict[str, Any]]:
+        normed = self.pre_norm(hidden)
+        router_logits = self.router(normed)
+        topk_logits, topk_idx = torch.topk(router_logits, self.top_k, dim=-1)
+        topk_weights = torch.softmax(topk_logits, dim=-1)
+
+        flat = normed.reshape(-1, normed.shape[-1])
+        output = torch.zeros_like(flat)
+        route_counts = torch.zeros(self.num_experts, device=hidden.device, dtype=torch.long)
+
+        flat_topk_idx = topk_idx.reshape(-1, self.top_k)
+        flat_topk_weights = topk_weights.reshape(-1, self.top_k)
+        for slot in range(self.top_k):
+            slot_idx = flat_topk_idx[:, slot]
+            slot_weight = flat_topk_weights[:, slot].unsqueeze(-1)
+            for expert_idx, expert in enumerate(self.experts):
+                mask = slot_idx == expert_idx
+                if not mask.any():
+                    continue
+                selected = flat[mask]
+                routed = expert(selected) * slot_weight[mask]
+                output[mask] += routed
+                route_counts[expert_idx] += int(mask.sum().item())
+
+        output = self.post_norm(output + flat)
+        return output.reshape_as(hidden), {
+            "route_counts": route_counts.detach().cpu().tolist(),
+            "mean_router_logit": float(router_logits.mean().item()),
+            "std_router_logit": float(router_logits.std(unbiased=False).item()),
+        }
+
+
+class TinyMoEModel(nn.Module):
+    def __init__(
+        self,
+        vocab_size: int,
+        hidden_size: int,
+        intermediate_size: int,
+        num_layers: int,
+        num_experts: int,
+        top_k: int,
+    ) -> None:
+        super().__init__()
+        self.embed = nn.Embedding(vocab_size, hidden_size)
+        self.layers = nn.ModuleList(
+            [TinyMoELayer(hidden_size, intermediate_size, num_experts, top_k) for _ in range(num_layers)]
+        )
+        self.final_norm = nn.LayerNorm(hidden_size)
+        self.lm_head = nn.Linear(hidden_size, vocab_size, bias=False)
+        self.vocab_size = vocab_size
+
+    def forward(self, input_ids: torch.Tensor) -> tuple[torch.Tensor, list[dict[str, Any]]]:
+        hidden = self.embed(input_ids)
+        layer_stats: list[dict[str, Any]] = []
+        for layer in self.layers:
+            hidden, stats = layer(hidden)
+            layer_stats.append(stats)
+        logits = self.lm_head(self.final_norm(hidden))
+        return logits, layer_stats
+
+
+def run_synthetic_benchmark(args: argparse.Namespace, output_dir: Path, env: dict[str, Any]) -> int:
+    device = "cuda" if env["cuda_available"] else "cpu"
+    torch_dtype = resolve_dtype(torch, args.dtype, bool(env["cuda_available"]))
+    generator = torch.Generator(device="cpu").manual_seed(1234)
+    model = TinyMoEModel(
+        vocab_size=args.synthetic_vocab_size,
+        hidden_size=args.synthetic_hidden_size,
+        intermediate_size=args.synthetic_intermediate_size,
+        num_layers=args.synthetic_num_layers,
+        num_experts=args.synthetic_num_experts,
+        top_k=args.synthetic_top_k,
+    ).to(device=device, dtype=torch_dtype)
+    model.eval()
+
+    load_seconds = 0.0
+    rows: list[dict[str, Any]] = []
+    generations_path = output_dir / "generations.jsonl"
+    route_totals = [0 for _ in range(args.synthetic_num_experts)]
+
+    with generations_path.open("w", encoding="utf-8") as out:
+        for idx, prompt in enumerate(load_prompts(args.prompt_file)):
+            input_ids = torch.randint(
+                low=0,
+                high=args.synthetic_vocab_size,
+                size=(args.synthetic_batch_size, args.synthetic_seq_len),
+                generator=generator,
+                device=device,
+            )
+            prompt_tokens = int(input_ids.shape[-1])
+            repeats = args.warmup_iters + args.benchmark_iters
+            for rep in range(repeats):
+                if device == "cuda":
+                    torch.cuda.reset_peak_memory_stats()
+                    torch.cuda.synchronize()
+                start = time.perf_counter()
+                cur_ids = input_ids
+                last_stats: list[dict[str, Any]] = []
+                with torch.inference_mode():
+                    for _ in range(args.max_new_tokens):
+                        logits, layer_stats = model(cur_ids)
+                        last_stats = layer_stats
+                        next_token = torch.argmax(logits[:, -1, :], dim=-1, keepdim=True)
+                        cur_ids = torch.cat([cur_ids, next_token], dim=-1)
+                if device == "cuda":
+                    torch.cuda.synchronize()
+                latency = time.perf_counter() - start
+                generated_tokens = int(cur_ids.shape[-1] - prompt_tokens)
+                for layer_stat in last_stats:
+                    for expert_idx, count in enumerate(layer_stat["route_counts"]):
+                        route_totals[expert_idx] += int(count)
+                row = {
+                    "prompt_id": idx,
+                    "repeat": rep,
+                    "is_warmup": rep < args.warmup_iters,
+                    "input_tokens": prompt_tokens,
+                    "generated_tokens": generated_tokens,
+                    "latency_s": latency,
+                    "tokens_per_s": generated_tokens / latency if latency > 0 else 0.0,
+                    "peak_allocated_mb": (
+                        torch.cuda.max_memory_allocated() / (1024 * 1024) if device == "cuda" else 0.0
+                    ),
+                }
+                rows.append(row)
+                if rep >= args.warmup_iters:
+                    out.write(
+                        json.dumps(
+                            {
+                                "prompt": prompt,
+                                "input_ids_shape": list(input_ids.shape),
+                                "generated_ids_shape": list(cur_ids.shape),
+                                "route_totals": route_totals,
+                                **row,
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
+
+    metric_rows = [row for row in rows if not row["is_warmup"]]
+    mean_latency = sum(float(row["latency_s"]) for row in metric_rows) / max(1, len(metric_rows))
+    mean_tps = sum(float(row["tokens_per_s"]) for row in metric_rows) / max(1, len(metric_rows))
+    max_peak_mb = max((float(row["peak_allocated_mb"]) for row in metric_rows), default=0.0)
+    summary = {
+        "mode": "synthetic",
+        "device": device,
+        "dtype": str(torch_dtype),
+        "load_seconds": load_seconds,
+        "benchmark_rows": len(metric_rows),
+        "mean_latency_s": mean_latency,
+        "mean_tokens_per_s": mean_tps,
+        "max_peak_allocated_mb": max_peak_mb,
+        "route_totals": route_totals,
+        "synthetic_config": {
+            "batch_size": args.synthetic_batch_size,
+            "seq_len": args.synthetic_seq_len,
+            "vocab_size": args.synthetic_vocab_size,
+            "hidden_size": args.synthetic_hidden_size,
+            "intermediate_size": args.synthetic_intermediate_size,
+            "num_layers": args.synthetic_num_layers,
+            "num_experts": args.synthetic_num_experts,
+            "top_k": args.synthetic_top_k,
+        },
+    }
+    write_json(output_dir / "metrics.json", summary)
+
+    with (output_dir / "per_prompt_metrics.csv").open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+    return 0
 
 
 def collect_environment(torch: Any) -> dict[str, Any]:
@@ -108,6 +288,7 @@ def resolve_dtype(torch: Any, dtype: str, cuda_available: bool) -> Any:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", required=True, type=Path)
+    parser.add_argument("--mode", choices=["synthetic", "hf"], default="synthetic")
     parser.add_argument("--model-id", default="Qwen/Qwen1.5-MoE-A2.7B-Chat")
     parser.add_argument("--prompt-file")
     parser.add_argument("--max-new-tokens", type=int, default=32)
@@ -115,11 +296,19 @@ def main() -> int:
     parser.add_argument("--benchmark-iters", type=int, default=3)
     parser.add_argument("--dtype", choices=["float16", "bfloat16", "float32"], default="float16")
     parser.add_argument("--require-cuda", choices=["0", "1"], default="1")
+    parser.add_argument("--synthetic-batch-size", type=int, default=1)
+    parser.add_argument("--synthetic-seq-len", type=int, default=64)
+    parser.add_argument("--synthetic-vocab-size", type=int, default=2048)
+    parser.add_argument("--synthetic-hidden-size", type=int, default=256)
+    parser.add_argument("--synthetic-intermediate-size", type=int, default=512)
+    parser.add_argument("--synthetic-num-layers", type=int, default=4)
+    parser.add_argument("--synthetic-num-experts", type=int, default=8)
+    parser.add_argument("--synthetic-top-k", type=int, default=2)
     args = parser.parse_args()
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    torch, model_cls, tokenizer_cls = import_or_fail(args.output_dir)
-    env = collect_environment(torch)
+    torch_mod, _, _ = import_torch_only(args.output_dir)
+    env = collect_environment(torch_mod)
     write_json(args.output_dir / "environment.json", env)
 
     if args.require_cuda == "1" and not env["cuda_available"]:
@@ -127,11 +316,30 @@ def main() -> int:
             args.output_dir / "error.json",
             {
                 "stage": "cuda_preflight",
-                "error": "CUDA is not available to PyTorch; aborting before model download/load.",
+                "error": "CUDA is not available to PyTorch; aborting before model load.",
                 "nvidia_smi": env.get("nvidia_smi"),
             },
         )
         return 43
+
+    if args.mode == "synthetic":
+        return run_synthetic_benchmark(args, args.output_dir, env)
+
+    try:
+        from transformers import AutoModelForCausalLM, AutoTokenizer  # type: ignore
+    except Exception as exc:
+        write_json(
+            args.output_dir / "error.json",
+            {
+                "stage": "import_transformers",
+                "error": repr(exc),
+            },
+        )
+        return 42
+
+    torch = torch_mod
+    model_cls = AutoModelForCausalLM
+    tokenizer_cls = AutoTokenizer
 
     device = "cuda" if env["cuda_available"] else "cpu"
     torch_dtype = resolve_dtype(torch, args.dtype, bool(env["cuda_available"]))

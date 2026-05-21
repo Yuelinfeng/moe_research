@@ -17,7 +17,7 @@
     "branch": "main"
   },
   "experiment": {
-    "runLabel": "qwen_moe_baseline",
+    "runLabel": "synthetic_moe_baseline",
     "runCommand": "bash experiments/run_baseline.sh --output-dir \"$RUN_DIR\""
   }
 }

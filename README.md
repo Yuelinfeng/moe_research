@@ -83,10 +83,12 @@ powershell -ExecutionPolicy Bypass -File scripts/local_push_run_fetch.ps1 `
   -Config configs/remote.local.json
 ```
 
-The default experiment is a short Hugging Face MoE inference baseline for
-`Qwen/Qwen1.5-MoE-A2.7B-Chat`. It records environment checks, `nvidia-smi`,
-latency, token throughput, and peak CUDA memory. It intentionally aborts before
-model download when CUDA is not visible to PyTorch.
+The default experiment is a synthetic Tiny-MoE GPU baseline with real router,
+top-k dispatch, and expert MLP compute. It records environment checks,
+`nvidia-smi`, latency, token throughput, peak CUDA memory, and route counts.
+This keeps the first remote experiment independent from Hugging Face network
+availability. Set `BASELINE_MODE=hf` when a real pretrained MoE checkpoint is
+available locally or through a working mirror.
 
 Useful overrides:
 
@@ -94,7 +96,7 @@ Useful overrides:
 powershell -ExecutionPolicy Bypass -File scripts/local_push_run_fetch.ps1 `
   -Config configs/remote.local.json `
   -RunLabel qwen_moe_baseline `
-  -RunCommand 'MODEL_ID=Qwen/Qwen1.5-MoE-A2.7B-Chat MAX_NEW_TOKENS=32 bash experiments/run_baseline.sh --output-dir "$RUN_DIR"'
+  -RunCommand 'BASELINE_MODE=hf MODEL_ID=Qwen/Qwen1.5-MoE-A2.7B-Chat MAX_NEW_TOKENS=32 bash experiments/run_baseline.sh --output-dir "$RUN_DIR"'
 ```
 
 If the target local repo has uncommitted changes and you want the script to
