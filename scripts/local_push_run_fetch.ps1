@@ -227,7 +227,8 @@ try {
     $configLines = $remoteRunConfig.GetEnumerator() | ForEach-Object {
         "export $($_.Key)=$(ConvertTo-ShellLiteral ([string]$_.Value))"
     }
-    $configLines | Set-Content -LiteralPath $localRemoteConfig -Encoding ASCII
+    $configText = ($configLines -join "`n") + "`n"
+    [System.IO.File]::WriteAllText($localRemoteConfig, $configText, [System.Text.Encoding]::ASCII)
 
     Invoke-Native scp @($ScpPrefixArgs + @($remoteScriptLocal, "${RemoteTarget}:$remoteScriptPath"))
     Invoke-Native scp @($ScpPrefixArgs + @($localRemoteConfig, "${RemoteTarget}:$remoteConfigPath"))
