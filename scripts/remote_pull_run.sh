@@ -2,34 +2,14 @@
 set -Eeuo pipefail
 
 if [[ $# -lt 1 ]]; then
-  echo "usage: remote_pull_run.sh <config.json>" >&2
+  echo "usage: remote_pull_run.sh <config.env>" >&2
   exit 2
 fi
 
-CONFIG_JSON="$1"
-if command -v python3 >/dev/null 2>&1; then
-  PYTHON_BIN="python3"
-elif command -v python >/dev/null 2>&1; then
-  PYTHON_BIN="python"
-else
-  echo "python3 or python is required on the remote server" >&2
-  exit 2
-fi
-
-eval "$("$PYTHON_BIN" - "$CONFIG_JSON" <<'PY'
-import json
-import shlex
-import sys
-
-with open(sys.argv[1], "r", encoding="utf-8-sig") as f:
-    cfg = json.load(f)
-
-for key, value in cfg.items():
-    if value is None:
-        continue
-    print(f"export {key}={shlex.quote(str(value))}")
-PY
-)"
+CONFIG_ENV="$1"
+# The local orchestrator uploads a shell-quoted env file. Keeping the remote
+# bootstrap pure Bash avoids requiring Python before the conda environment exists.
+source "$CONFIG_ENV"
 
 : "${REPO_PATH:?missing REPO_PATH}"
 : "${RUNS_ROOT:?missing RUNS_ROOT}"
@@ -113,7 +93,10 @@ finished_at=$finished_at
 exit_code=$exit_code
 EOF
 
-  "$PYTHON_BIN" - "$RUN_DIR/manifest.json" <<PY
+  if command -v python3 >/dev/null 2>&1 || command -v python >/dev/null 2>&1; then
+    local python_bin
+    python_bin="$(command -v python3 || command -v python)"
+    "$python_bin" - "$RUN_DIR/manifest.json" <<PY
 import json
 import os
 import sys
@@ -137,6 +120,7 @@ with open(sys.argv[1], "w", encoding="utf-8") as f:
     json.dump(payload, f, indent=2)
     f.write("\\n")
 PY
+  fi
 }
 
 export RUN_ID RUN_DIR COMMIT SHORT_COMMIT REPO_PATH BRANCH GIT_REMOTE RUN_LABEL RUN_COMMAND STARTED_AT

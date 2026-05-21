@@ -104,6 +104,14 @@ function Resolve-LocalPath {
     return [System.IO.Path]::GetFullPath((Join-Path (Get-Location) $Path))
 }
 
+function ConvertTo-ShellLiteral {
+    param([AllowNull()][string]$Value)
+    if ($null -eq $Value) {
+        return "''"
+    }
+    return "'" + ($Value -replace "'", "'\''") + "'"
+}
+
 if ($Help) {
     Show-Help
     exit 0
@@ -146,7 +154,7 @@ $RemoteTarget = if ([string]::IsNullOrWhiteSpace($RemoteUser)) {
     "${RemoteUser}@${RemoteHost}"
 }
 $SshPrefixArgs = @()
-$ScpPrefixArgs = @()
+$ScpPrefixArgs = @("-O")
 if (-not [string]::IsNullOrWhiteSpace($RemotePort)) {
     $SshPrefixArgs += @("-p", $RemotePort)
     $ScpPrefixArgs += @("-P", $RemotePort)
@@ -198,9 +206,9 @@ if (-not (Test-Path -LiteralPath $remoteScriptLocal)) {
 }
 
 $guid = [guid]::NewGuid().ToString("N")
-$localRemoteConfig = Join-Path ([System.IO.Path]::GetTempPath()) "airs_remote_config_$guid.json"
+$localRemoteConfig = Join-Path ([System.IO.Path]::GetTempPath()) "airs_remote_config_$guid.env"
 $remoteScriptPath = "/tmp/airs_remote_pull_run_$guid.sh"
-$remoteConfigPath = "/tmp/airs_remote_config_$guid.json"
+$remoteConfigPath = "/tmp/airs_remote_config_$guid.env"
 
 $remoteRunConfig = [ordered]@{
     REPO_PATH = $RemoteRepoPath
@@ -216,7 +224,10 @@ $remoteRunConfig = [ordered]@{
 
 $localRunPath = $null
 try {
-    $remoteRunConfig | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $localRemoteConfig -Encoding UTF8
+    $configLines = $remoteRunConfig.GetEnumerator() | ForEach-Object {
+        "export $($_.Key)=$(ConvertTo-ShellLiteral ([string]$_.Value))"
+    }
+    $configLines | Set-Content -LiteralPath $localRemoteConfig -Encoding ASCII
 
     Invoke-Native scp @($ScpPrefixArgs + @($remoteScriptLocal, "${RemoteTarget}:$remoteScriptPath"))
     Invoke-Native scp @($ScpPrefixArgs + @($localRemoteConfig, "${RemoteTarget}:$remoteConfigPath"))
