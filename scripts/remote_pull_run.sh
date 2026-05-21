@@ -23,7 +23,12 @@ EXPECTED_COMMIT="${EXPECTED_COMMIT:-}"
 REPO_URL="${REPO_URL:-}"
 
 if [[ ! -d "$REPO_PATH/.git" ]]; then
-  if [[ -n "$REPO_URL" && ! -e "$REPO_PATH" ]]; then
+  if [[ -n "$REPO_URL" ]]; then
+    if [[ -e "$REPO_PATH" ]]; then
+      BACKUP_PATH="${REPO_PATH}.invalid_$(date +%Y%m%d_%H%M%S)"
+      echo "remote repo path exists but is not a git repository; moving it to $BACKUP_PATH" >&2
+      mv "$REPO_PATH" "$BACKUP_PATH"
+    fi
     mkdir -p "$(dirname "$REPO_PATH")"
     git clone "$REPO_URL" "$REPO_PATH"
   else

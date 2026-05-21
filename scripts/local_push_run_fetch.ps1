@@ -235,12 +235,19 @@ try {
     $remoteCommand = "chmod +x $remoteScriptPath && bash $remoteScriptPath $remoteConfigPath; status=`$?; rm -f $remoteScriptPath $remoteConfigPath; exit `$status"
     $outputLines = New-Object "System.Collections.Generic.List[string]"
 
-    & ssh @SshPrefixArgs $RemoteTarget $remoteCommand 2>&1 | ForEach-Object {
-        $line = $_.ToString()
-        $outputLines.Add($line)
-        Write-Host $line
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & ssh @SshPrefixArgs $RemoteTarget $remoteCommand 2>&1 | ForEach-Object {
+            $line = $_.ToString()
+            $outputLines.Add($line)
+            Write-Host $line
+        }
+        $remoteStatus = $LASTEXITCODE
     }
-    $remoteStatus = $LASTEXITCODE
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
 
     $runIdLine = $outputLines | Where-Object { $_ -match "^AIRS_RUN_ID=" } | Select-Object -Last 1
     $runDirLine = $outputLines | Where-Object { $_ -match "^AIRS_RUN_DIR=" } | Select-Object -Last 1
