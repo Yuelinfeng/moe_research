@@ -1,0 +1,13 @@
+.idea/
+.vscode/
+__pycache__/
+*.pyc
+
+configs/remote.local.json
+configs/*.secret.json
+
+results/*
+!results/.gitkeep
+
+*.log
+*.tmp

@@ -1,0 +1,23 @@
+{
+  "local": {
+    "repoPath": "D:/moe_research",
+    "resultsRoot": "D:/moe_research/results"
+  },
+  "remote": {
+    "host": "121.48.170.6",
+    "user": "root",
+    "port": "50473",
+    "repoUrl": "https://github.com/Yuelinfeng/moe_research.git",
+    "repoPath": "/root/autodl-tmp/moe_research",
+    "runsRoot": "/root/autodl-tmp/runs/moe_research",
+    "setupCommand": ""
+  },
+  "git": {
+    "remote": "origin",
+    "branch": "main"
+  },
+  "experiment": {
+    "runLabel": "smoke",
+    "runCommand": "if [[ -x experiments/run_baseline.sh ]]; then bash experiments/run_baseline.sh --output-dir \"$RUN_DIR\"; elif [[ -f experiments/run_baseline.sh ]]; then bash experiments/run_baseline.sh --output-dir \"$RUN_DIR\"; else git status --short > \"$RUN_DIR/repo_status.txt\"; find . -maxdepth 3 -type f | sort > \"$RUN_DIR/repo_files.txt\"; echo \"No experiment entrypoint configured; wrote repo inventory.\"; fi"
+  }
+}
