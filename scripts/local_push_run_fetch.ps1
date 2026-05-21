@@ -207,8 +207,10 @@ if (-not (Test-Path -LiteralPath $remoteScriptLocal)) {
 
 $guid = [guid]::NewGuid().ToString("N")
 $localRemoteConfig = Join-Path ([System.IO.Path]::GetTempPath()) "airs_remote_config_$guid.env"
+$localGitBundle = Join-Path ([System.IO.Path]::GetTempPath()) "airs_git_bundle_$guid.bundle"
 $remoteScriptPath = "/tmp/airs_remote_pull_run_$guid.sh"
 $remoteConfigPath = "/tmp/airs_remote_config_$guid.env"
+$remoteBundlePath = "/tmp/airs_git_bundle_$guid.bundle"
 
 $remoteRunConfig = [ordered]@{
     REPO_PATH = $RemoteRepoPath
@@ -220,6 +222,7 @@ $remoteRunConfig = [ordered]@{
     SETUP_COMMAND = $SetupCommand
     EXPECTED_COMMIT = $localCommit
     REPO_URL = $RemoteRepoUrl
+    FALLBACK_BUNDLE = $remoteBundlePath
 }
 
 $localRunPath = $null
@@ -230,10 +233,19 @@ try {
     $configText = ($configLines -join "`n") + "`n"
     [System.IO.File]::WriteAllText($localRemoteConfig, $configText, [System.Text.Encoding]::ASCII)
 
+    Push-Location $RepoLocalPath
+    try {
+        Invoke-Native git @("bundle", "create", $localGitBundle, "HEAD")
+    }
+    finally {
+        Pop-Location
+    }
+
     Invoke-Native scp @($ScpPrefixArgs + @($remoteScriptLocal, "${RemoteTarget}:$remoteScriptPath"))
     Invoke-Native scp @($ScpPrefixArgs + @($localRemoteConfig, "${RemoteTarget}:$remoteConfigPath"))
+    Invoke-Native scp @($ScpPrefixArgs + @($localGitBundle, "${RemoteTarget}:$remoteBundlePath"))
 
-    $remoteCommand = "chmod +x $remoteScriptPath && bash $remoteScriptPath $remoteConfigPath; status=`$?; rm -f $remoteScriptPath $remoteConfigPath; exit `$status"
+    $remoteCommand = "chmod +x $remoteScriptPath && bash $remoteScriptPath $remoteConfigPath; status=`$?; rm -f $remoteScriptPath $remoteConfigPath $remoteBundlePath; exit `$status"
     $outputLines = New-Object "System.Collections.Generic.List[string]"
 
     $previousErrorActionPreference = $ErrorActionPreference
@@ -275,5 +287,8 @@ try {
 finally {
     if (Test-Path -LiteralPath $localRemoteConfig) {
         Remove-Item -LiteralPath $localRemoteConfig -Force
+    }
+    if (Test-Path -LiteralPath $localGitBundle) {
+        Remove-Item -LiteralPath $localGitBundle -Force
     }
 }

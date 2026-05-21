@@ -21,6 +21,21 @@ RUN_LABEL="${RUN_LABEL:-moe_run}"
 SETUP_COMMAND="${SETUP_COMMAND:-}"
 EXPECTED_COMMIT="${EXPECTED_COMMIT:-}"
 REPO_URL="${REPO_URL:-}"
+FALLBACK_BUNDLE="${FALLBACK_BUNDLE:-}"
+
+fetch_target_ref() {
+  if git -c http.version=HTTP/1.1 fetch "$GIT_REMOTE" "$BRANCH"; then
+    return 0
+  fi
+
+  if [[ -n "$FALLBACK_BUNDLE" && -f "$FALLBACK_BUNDLE" ]]; then
+    echo "git fetch from $GIT_REMOTE/$BRANCH failed; using uploaded bundle fallback" >&2
+    git fetch "$FALLBACK_BUNDLE" HEAD
+    return 0
+  fi
+
+  return 1
+}
 
 if [[ ! -d "$REPO_PATH/.git" ]]; then
   if [[ -n "$REPO_URL" ]]; then
@@ -30,7 +45,19 @@ if [[ ! -d "$REPO_PATH/.git" ]]; then
       mv "$REPO_PATH" "$BACKUP_PATH"
     fi
     mkdir -p "$(dirname "$REPO_PATH")"
-    git clone "$REPO_URL" "$REPO_PATH"
+    if ! git -c http.version=HTTP/1.1 clone "$REPO_URL" "$REPO_PATH"; then
+      if [[ -n "$FALLBACK_BUNDLE" && -f "$FALLBACK_BUNDLE" ]]; then
+        echo "git clone failed; initializing repository from uploaded bundle fallback" >&2
+        mkdir -p "$REPO_PATH"
+        cd "$REPO_PATH"
+        git init
+        git remote add "$GIT_REMOTE" "$REPO_URL" || true
+        git fetch "$FALLBACK_BUNDLE" HEAD
+        git checkout -B "$BRANCH" FETCH_HEAD
+      else
+        exit 10
+      fi
+    fi
   else
     echo "remote repo path is not a git repository: $REPO_PATH" >&2
     echo "set remote.repoUrl to let the runner clone it automatically" >&2
@@ -46,13 +73,13 @@ if [[ -n "$(git status --porcelain)" ]]; then
   exit 20
 fi
 
-git fetch "$GIT_REMOTE" "$BRANCH"
+fetch_target_ref
 if git rev-parse --verify "$BRANCH" >/dev/null 2>&1; then
   git checkout "$BRANCH"
 else
-  git checkout -B "$BRANCH" "$GIT_REMOTE/$BRANCH"
+  git checkout -B "$BRANCH" FETCH_HEAD
 fi
-git pull --ff-only "$GIT_REMOTE" "$BRANCH"
+git merge --ff-only FETCH_HEAD
 
 COMMIT="$(git rev-parse HEAD)"
 SHORT_COMMIT="$(git rev-parse --short HEAD)"
