@@ -284,6 +284,17 @@ def resolve_dtype(torch: Any, dtype: str, cuda_available: bool) -> Any:
     return torch.float16
 
 
+def normalize_device_name(device: Any, fallback: str) -> str:
+    if isinstance(device, int):
+        return f"cuda:{device}"
+    text = str(device)
+    if text.isdigit():
+        return f"cuda:{text}"
+    if text in {"disk", "meta"}:
+        return fallback
+    return text
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", required=True, type=Path)
@@ -407,9 +418,8 @@ def main() -> int:
                 break
         else:
             first_device = next(iter(hf_device_map.values()), device)
-            input_device = str(first_device)
-    if input_device == "disk":
-        input_device = device
+            input_device = normalize_device_name(first_device, device)
+    input_device = normalize_device_name(input_device, device)
 
     pad_token_id = tokenizer.pad_token_id or tokenizer.eos_token_id
     rows: list[dict[str, Any]] = []
@@ -418,20 +428,35 @@ def main() -> int:
         for idx, prompt in enumerate(prompts):
             repeats = args.warmup_iters + args.benchmark_iters
             for rep in range(repeats):
-                inputs = tokenizer(prompt, return_tensors="pt").to(input_device)
-                if device == "cuda":
-                    torch.cuda.reset_peak_memory_stats()
-                    torch.cuda.synchronize()
-                start = time.perf_counter()
-                with torch.inference_mode():
-                    output_ids = model.generate(
-                        **inputs,
-                        max_new_tokens=args.max_new_tokens,
-                        do_sample=False,
-                        pad_token_id=pad_token_id,
+                try:
+                    inputs = tokenizer(prompt, return_tensors="pt").to(input_device)
+                    if device == "cuda":
+                        torch.cuda.reset_peak_memory_stats()
+                        torch.cuda.synchronize()
+                    start = time.perf_counter()
+                    with torch.inference_mode():
+                        output_ids = model.generate(
+                            **inputs,
+                            max_new_tokens=args.max_new_tokens,
+                            do_sample=False,
+                            pad_token_id=pad_token_id,
+                        )
+                    if device == "cuda":
+                        torch.cuda.synchronize()
+                except Exception as exc:
+                    write_json(
+                        args.output_dir / "error.json",
+                        {
+                            "stage": "generate",
+                            "model_id": args.model_id,
+                            "device": device,
+                            "input_device": input_device,
+                            "hf_placement": args.hf_placement,
+                            "hf_device_map": hf_device_map,
+                            "error": repr(exc),
+                        },
                     )
-                if device == "cuda":
-                    torch.cuda.synchronize()
+                    return 46
                 latency = time.perf_counter() - start
                 input_tokens = int(inputs["input_ids"].shape[-1])
                 total_tokens = int(output_ids.shape[-1])
