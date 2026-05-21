@@ -43,6 +43,7 @@ export HF_HOME="${HF_HOME:-/root/autodl-tmp/hf-cache}"
 export HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
 export HF_HUB_CACHE="${HF_HUB_CACHE:-${HF_HOME}/hub}"
 export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-${HF_HOME}/transformers}"
+export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 export PIP_CACHE_DIR="${PIP_CACHE_DIR:-/root/autodl-tmp/pip-cache}"
 export TMPDIR="${TMPDIR:-/root/autodl-tmp/tmp}"
 mkdir -p "$HF_HOME" "$HF_HUB_CACHE" "$TRANSFORMERS_CACHE" "$PIP_CACHE_DIR" "$TMPDIR"
@@ -71,6 +72,10 @@ fi
   --warmup-iters "${WARMUP_ITERS:-1}" \
   --benchmark-iters "${BENCHMARK_ITERS:-3}" \
   --dtype "${MODEL_DTYPE:-float16}" \
+  --hf-placement "${HF_PLACEMENT:-auto}" \
+  --cuda-max-memory "${CUDA_MAX_MEMORY:-12GiB}" \
+  --cpu-max-memory "${CPU_MAX_MEMORY:-38GiB}" \
+  --offload-dir "${OFFLOAD_DIR:-${OUTPUT_DIR}/offload}" \
   --require-cuda "${MOE_REQUIRE_CUDA:-1}" \
   --synthetic-batch-size "${SYNTHETIC_BATCH_SIZE:-1}" \
   --synthetic-seq-len "${SYNTHETIC_SEQ_LEN:-64}" \

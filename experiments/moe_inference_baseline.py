@@ -294,6 +294,10 @@ def main() -> int:
     parser.add_argument("--warmup-iters", type=int, default=1)
     parser.add_argument("--benchmark-iters", type=int, default=3)
     parser.add_argument("--dtype", choices=["float16", "bfloat16", "float32"], default="float16")
+    parser.add_argument("--hf-placement", choices=["auto", "cuda"], default="auto")
+    parser.add_argument("--cuda-max-memory", default="12GiB")
+    parser.add_argument("--cpu-max-memory", default="38GiB")
+    parser.add_argument("--offload-dir", type=Path)
     parser.add_argument("--require-cuda", choices=["0", "1"], default="1")
     parser.add_argument("--synthetic-batch-size", type=int, default=1)
     parser.add_argument("--synthetic-seq-len", type=int, default=64)
@@ -347,11 +351,25 @@ def main() -> int:
     load_start = time.perf_counter()
     try:
         tokenizer = tokenizer_cls.from_pretrained(args.model_id, trust_remote_code=True)
+        model_kwargs: dict[str, Any] = {
+            "torch_dtype": torch_dtype,
+            "trust_remote_code": True,
+            "low_cpu_mem_usage": True,
+        }
+        if args.hf_placement == "auto" and device == "cuda":
+            offload_dir = args.offload_dir or (args.output_dir / "offload")
+            offload_dir.mkdir(parents=True, exist_ok=True)
+            model_kwargs.update(
+                {
+                    "device_map": "auto",
+                    "max_memory": {0: args.cuda_max_memory, "cpu": args.cpu_max_memory},
+                    "offload_folder": str(offload_dir),
+                    "offload_state_dict": True,
+                }
+            )
         model = model_cls.from_pretrained(
             args.model_id,
-            torch_dtype=torch_dtype,
-            trust_remote_code=True,
-            low_cpu_mem_usage=True,
+            **model_kwargs,
         )
     except Exception as exc:
         write_json(
@@ -363,9 +381,35 @@ def main() -> int:
             },
         )
         return 44
-    model.to(device)
+    try:
+        if not (args.hf_placement == "auto" and hasattr(model, "hf_device_map")):
+            model.to(device)
+    except Exception as exc:
+        write_json(
+            args.output_dir / "error.json",
+            {
+                "stage": "move_hf_model_to_device",
+                "model_id": args.model_id,
+                "device": device,
+                "hf_placement": args.hf_placement,
+                "error": repr(exc),
+            },
+        )
+        return 45
     model.eval()
     load_seconds = time.perf_counter() - load_start
+    hf_device_map = getattr(model, "hf_device_map", None)
+    input_device = device
+    if isinstance(hf_device_map, dict):
+        for key in ("model.embed_tokens", "transformer.wte", "embed_tokens"):
+            if key in hf_device_map:
+                input_device = str(hf_device_map[key])
+                break
+        else:
+            first_device = next(iter(hf_device_map.values()), device)
+            input_device = str(first_device)
+    if input_device == "disk":
+        input_device = device
 
     pad_token_id = tokenizer.pad_token_id or tokenizer.eos_token_id
     rows: list[dict[str, Any]] = []
@@ -374,7 +418,7 @@ def main() -> int:
         for idx, prompt in enumerate(prompts):
             repeats = args.warmup_iters + args.benchmark_iters
             for rep in range(repeats):
-                inputs = tokenizer(prompt, return_tensors="pt").to(device)
+                inputs = tokenizer(prompt, return_tensors="pt").to(input_device)
                 if device == "cuda":
                     torch.cuda.reset_peak_memory_stats()
                     torch.cuda.synchronize()
@@ -417,6 +461,9 @@ def main() -> int:
         "model_id": args.model_id,
         "device": device,
         "dtype": str(torch_dtype),
+        "hf_placement": args.hf_placement,
+        "hf_device_map": hf_device_map,
+        "input_device": input_device,
         "load_seconds": load_seconds,
         "benchmark_rows": len(metric_rows),
         "mean_latency_s": mean_latency,
