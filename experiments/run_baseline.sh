@@ -46,6 +46,7 @@ if [[ -z "$PYTHON_BIN" ]]; then
 fi
 
 export HF_HOME="${HF_HOME:-/root/autodl-tmp/hf-cache}"
+export HF_HUB_DISABLE_XET="${HF_HUB_DISABLE_XET:-1}"
 if [[ "${USE_PROXY:-0}" == "1" ]]; then
   PROXY_URL="${PROXY_URL:-http://127.0.0.1:7890}"
   export http_proxy="$PROXY_URL"
@@ -65,6 +66,7 @@ mkdir -p "$HF_HOME" "$HF_HUB_CACHE" "$TRANSFORMERS_CACHE" "$PIP_CACHE_DIR" "$TMP
   echo "baseline_mode=${BASELINE_MODE:-hf}"
   echo "model_id=${MODEL_ID:-Qwen/Qwen1.5-MoE-A2.7B-Chat}"
   echo "hf_endpoint=${HF_ENDPOINT:-<unset>}"
+  echo "hf_hub_disable_xet=${HF_HUB_DISABLE_XET:-<unset>}"
   echo "proxy=${https_proxy:-<unset>}"
   echo "require_cuda=${MOE_REQUIRE_CUDA:-1}"
   echo "hf_home=$HF_HOME"
