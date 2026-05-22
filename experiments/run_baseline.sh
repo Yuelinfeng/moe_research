@@ -27,6 +27,8 @@ PYTHON_BIN="${PYTHON_BIN:-}"
 if [[ -z "$PYTHON_BIN" ]]; then
   if [[ -x /root/miniconda3/envs/deepseek_moe/bin/python ]]; then
     PYTHON_BIN="/root/miniconda3/envs/deepseek_moe/bin/python"
+  elif [[ -x /root/autodl-tmp/conda-envs/moe-research/bin/python ]]; then
+    PYTHON_BIN="/root/autodl-tmp/conda-envs/moe-research/bin/python"
   elif [[ -x /root/autodl-tmp/conda-envs/shiftguard-moe/bin/python ]]; then
     PYTHON_BIN="/root/autodl-tmp/conda-envs/shiftguard-moe/bin/python"
   elif [[ -x /root/miniconda3/envs/moe-infinity/bin/python ]]; then
@@ -44,7 +46,13 @@ if [[ -z "$PYTHON_BIN" ]]; then
 fi
 
 export HF_HOME="${HF_HOME:-/root/autodl-tmp/hf-cache}"
-export HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
+if [[ "${USE_PROXY:-0}" == "1" ]]; then
+  PROXY_URL="${PROXY_URL:-http://127.0.0.1:7890}"
+  export http_proxy="$PROXY_URL"
+  export https_proxy="$PROXY_URL"
+  export HTTP_PROXY="$PROXY_URL"
+  export HTTPS_PROXY="$PROXY_URL"
+fi
 export HF_HUB_CACHE="${HF_HUB_CACHE:-${HF_HOME}/hub}"
 export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-${HF_HOME}/transformers}"
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
@@ -56,7 +64,8 @@ mkdir -p "$HF_HOME" "$HF_HUB_CACHE" "$TRANSFORMERS_CACHE" "$PIP_CACHE_DIR" "$TMP
   echo "python=$PYTHON_BIN"
   echo "baseline_mode=${BASELINE_MODE:-hf}"
   echo "model_id=${MODEL_ID:-Qwen/Qwen1.5-MoE-A2.7B-Chat}"
-  echo "hf_endpoint=${HF_ENDPOINT:-https://hf-mirror.com}"
+  echo "hf_endpoint=${HF_ENDPOINT:-<unset>}"
+  echo "proxy=${https_proxy:-<unset>}"
   echo "require_cuda=${MOE_REQUIRE_CUDA:-1}"
   echo "hf_home=$HF_HOME"
   echo "tmpdir=$TMPDIR"
