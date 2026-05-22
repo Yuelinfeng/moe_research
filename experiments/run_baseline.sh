@@ -27,6 +27,10 @@ PYTHON_BIN="${PYTHON_BIN:-}"
 if [[ -z "$PYTHON_BIN" ]]; then
   if [[ -x /root/miniconda3/envs/deepseek_moe/bin/python ]]; then
     PYTHON_BIN="/root/miniconda3/envs/deepseek_moe/bin/python"
+  elif [[ -x /root/autodl-tmp/conda-envs/shiftguard-moe/bin/python ]]; then
+    PYTHON_BIN="/root/autodl-tmp/conda-envs/shiftguard-moe/bin/python"
+  elif [[ -x /root/miniconda3/envs/moe-infinity/bin/python ]]; then
+    PYTHON_BIN="/root/miniconda3/envs/moe-infinity/bin/python"
   elif [[ -x /root/miniconda3/bin/python ]]; then
     PYTHON_BIN="/root/miniconda3/bin/python"
   elif command -v python3 >/dev/null 2>&1; then

@@ -6,7 +6,7 @@
   "remote": {
     "host": "121.48.170.6",
     "user": "root",
-    "port": "50473",
+    "port": "25095",
     "repoUrl": "https://github.com/Yuelinfeng/moe_research.git",
     "repoPath": "/root/autodl-tmp/moe_research",
     "runsRoot": "/root/autodl-tmp/runs/moe_research",
@@ -17,7 +17,7 @@
     "branch": "main"
   },
   "experiment": {
-    "runLabel": "qwen_moe_baseline",
-    "runCommand": "HF_ENDPOINT=https://hf-mirror.com BASELINE_MODE=hf MODEL_ID=Qwen/Qwen1.5-MoE-A2.7B-Chat MAX_NEW_TOKENS=8 WARMUP_ITERS=0 BENCHMARK_ITERS=1 bash experiments/run_baseline.sh --output-dir \"$RUN_DIR\""
+    "runLabel": "qwen_moe_4090_baseline",
+    "runCommand": "PYTHON_BIN=/root/autodl-tmp/conda-envs/shiftguard-moe/bin/python HF_ENDPOINT=https://hf-mirror.com BASELINE_MODE=hf MODEL_ID=Qwen/Qwen1.5-MoE-A2.7B-Chat CUDA_MAX_MEMORY=22GiB CPU_MAX_MEMORY=54GiB MAX_NEW_TOKENS=8 WARMUP_ITERS=0 BENCHMARK_ITERS=1 bash experiments/run_baseline.sh --output-dir \"$RUN_DIR\""
   }
 }

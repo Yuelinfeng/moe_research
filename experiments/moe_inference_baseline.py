@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
-"""Baseline MoE inference benchmark for the remote GPU runner."""
+"""Baseline MoE inference benchmark for the remote GPU runner.
+
+这个脚本用于对 MoE（Mixture of Experts）模型的推理性能进行基准测试，
+它包含两种运行模式：
+
+- synthetic：使用一个小型自定义 TinyMoEModel 进行合成 benchmark，适合没有真实 MoE 模型时进行性能对比。
+- hf：使用 Hugging Face 的实际模型加载与生成逻辑进行预测，适合真实模型推理验证。
+
+脚本会收集环境信息、生成结果、延迟、吞吐量、显存峰值等指标，并输出 JSON/CSV 结果。
+"""
 
 from __future__ import annotations
 
@@ -26,10 +35,15 @@ DEFAULT_PROMPTS = [
 
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:
+    """将字典内容格式化为 JSON 并写入指定路径。"""
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
 def run_command(command: list[str]) -> dict[str, Any]:
+    """执行系统命令并获取输出。
+
+    用于收集运行环境信息时执行诊断命令，如 nvidia-smi。
+    """
     try:
         proc = subprocess.run(command, capture_output=True, text=True, timeout=30, check=False)
         return {
@@ -42,6 +56,7 @@ def run_command(command: list[str]) -> dict[str, Any]:
 
 
 def import_torch_only(output_dir: Path):
+    """仅导入 PyTorch，并在失败时记录错误 JSON。"""
     try:
         import torch  # type: ignore
         import torch.nn as nn  # type: ignore
@@ -53,6 +68,14 @@ def import_torch_only(output_dir: Path):
 
 
 class TinyMoELayer(nn.Module):
+    """一个简单的 MoE 层实现，用于合成 benchmark。
+
+    这个层包含：
+    - router：负责将每个 token 分配给 top_k 个专家
+    - experts：若干个独立的前馈网络专家
+    - pre_norm / post_norm：分别在路由前和路由后做 LayerNorm
+    """
+
     def __init__(self, hidden_size: int, intermediate_size: int, num_experts: int, top_k: int) -> None:
         super().__init__()
         self.router = nn.Linear(hidden_size, num_experts, bias=False)
@@ -72,17 +95,27 @@ class TinyMoELayer(nn.Module):
         self.top_k = top_k
 
     def forward(self, hidden: torch.Tensor) -> tuple[torch.Tensor, dict[str, Any]]:
+        """前向计算。
+
+        输入 hidden 的形状为 [batch, seq_len, hidden_size]。
+        路由器输出 top_k 个专家索引和对应权重，再将 token 发送给专家计算。
+        """
         normed = self.pre_norm(hidden)
         router_logits = self.router(normed)
+
+        # 选取 top_k 个专家以及对应权重
         topk_logits, topk_idx = torch.topk(router_logits, self.top_k, dim=-1)
         topk_weights = torch.softmax(topk_logits, dim=-1)
 
+        # 将序列展平到二维矩阵，方便对每个 expert 进行批量计算
         flat = normed.reshape(-1, normed.shape[-1])
         output = torch.zeros_like(flat)
         route_counts = torch.zeros(self.num_experts, device=hidden.device, dtype=torch.long)
 
         flat_topk_idx = topk_idx.reshape(-1, self.top_k)
         flat_topk_weights = topk_weights.reshape(-1, self.top_k)
+
+        # 对于每个 top_k 位置，按 expert 分组计算专家网络
         for slot in range(self.top_k):
             slot_idx = flat_topk_idx[:, slot]
             slot_weight = flat_topk_weights[:, slot].unsqueeze(-1)
@@ -104,6 +137,8 @@ class TinyMoELayer(nn.Module):
 
 
 class TinyMoEModel(nn.Module):
+    """一个小型 MoE Transformer 风格语言模型，用于 synthetic benchmark。"""
+
     def __init__(
         self,
         vocab_size: int,
@@ -123,6 +158,7 @@ class TinyMoEModel(nn.Module):
         self.vocab_size = vocab_size
 
     def forward(self, input_ids: torch.Tensor) -> tuple[torch.Tensor, list[dict[str, Any]]]:
+        """前向计算：embedding -> 若干 MoE 层 -> 输出 logits。"""
         hidden = self.embed(input_ids)
         layer_stats: list[dict[str, Any]] = []
         for layer in self.layers:
@@ -133,9 +169,14 @@ class TinyMoEModel(nn.Module):
 
 
 def run_synthetic_benchmark(args: argparse.Namespace, output_dir: Path, env: dict[str, Any]) -> int:
+    """运行合成 TinyMoE benchmark，适合本地性能测试。
+
+    该函数通过自定义小型 MoE 模型生成 token，并记录延迟、吞吐量、显存峰值等性能指标。
+    """
     device = "cuda" if env["cuda_available"] else "cpu"
     torch_dtype = resolve_dtype(torch, args.dtype, bool(env["cuda_available"]))
     generator = torch.Generator(device="cpu").manual_seed(1234)
+
     model = TinyMoEModel(
         vocab_size=args.synthetic_vocab_size,
         hidden_size=args.synthetic_hidden_size,
@@ -153,6 +194,7 @@ def run_synthetic_benchmark(args: argparse.Namespace, output_dir: Path, env: dic
 
     with generations_path.open("w", encoding="utf-8") as out:
         for idx, prompt in enumerate(load_prompts(args.prompt_file)):
+            # 这里使用合成随机 input_ids 来代替实际 prompt token，保证 benchmark 可重复。
             input_ids = torch.randint(
                 low=0,
                 high=args.synthetic_vocab_size,
@@ -176,11 +218,16 @@ def run_synthetic_benchmark(args: argparse.Namespace, output_dir: Path, env: dic
                         cur_ids = torch.cat([cur_ids, next_token], dim=-1)
                 if device == "cuda":
                     torch.cuda.synchronize()
+
+                # 计算本次生成延迟和生成 token 数量
                 latency = time.perf_counter() - start
                 generated_tokens = int(cur_ids.shape[-1] - prompt_tokens)
+
+                # 统计每个专家的路由次数，用于后续分析专家负载
                 for layer_stat in last_stats:
                     for expert_idx, count in enumerate(layer_stat["route_counts"]):
                         route_totals[expert_idx] += int(count)
+
                 row = {
                     "prompt_id": idx,
                     "repeat": rep,
@@ -195,6 +242,7 @@ def run_synthetic_benchmark(args: argparse.Namespace, output_dir: Path, env: dic
                 }
                 rows.append(row)
                 if rep >= args.warmup_iters:
+                    # 仅 benchmark 轮次写入结果文件
                     out.write(
                         json.dumps(
                             {
@@ -213,6 +261,7 @@ def run_synthetic_benchmark(args: argparse.Namespace, output_dir: Path, env: dic
     mean_latency = sum(float(row["latency_s"]) for row in metric_rows) / max(1, len(metric_rows))
     mean_tps = sum(float(row["tokens_per_s"]) for row in metric_rows) / max(1, len(metric_rows))
     max_peak_mb = max((float(row["peak_allocated_mb"]) for row in metric_rows), default=0.0)
+
     summary = {
         "mode": "synthetic",
         "device": device,
@@ -244,6 +293,7 @@ def run_synthetic_benchmark(args: argparse.Namespace, output_dir: Path, env: dic
 
 
 def collect_environment(torch: Any) -> dict[str, Any]:
+    """收集当前运行环境信息，包括 CUDA、PyTorch 和显卡信息。"""
     cuda_available = bool(torch.cuda.is_available())
     payload: dict[str, Any] = {
         "python": sys.version,
@@ -267,6 +317,7 @@ def collect_environment(torch: Any) -> dict[str, Any]:
 
 
 def load_prompts(prompt_file: str | None) -> list[str]:
+    """加载 prompt 文件，若未提供则返回默认 prompt 列表。"""
     if not prompt_file:
         return DEFAULT_PROMPTS
     path = Path(prompt_file)
@@ -275,6 +326,7 @@ def load_prompts(prompt_file: str | None) -> list[str]:
 
 
 def resolve_dtype(torch: Any, dtype: str, cuda_available: bool) -> Any:
+    """根据运行环境选择合适的数据类型。"""
     if not cuda_available:
         return torch.float32
     if dtype == "bfloat16":
@@ -285,6 +337,7 @@ def resolve_dtype(torch: Any, dtype: str, cuda_available: bool) -> Any:
 
 
 def normalize_device_name(device: Any, fallback: str) -> str:
+    """将 device 表示规范化为 cuda:<index> 形式。"""
     if isinstance(device, int):
         return f"cuda:{device}"
     text = str(device)
@@ -296,6 +349,7 @@ def normalize_device_name(device: Any, fallback: str) -> str:
 
 
 def main() -> int:
+    """主入口，解析命令行参数并运行对应的 benchmark 模式。"""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--mode", choices=["synthetic", "hf"], default="synthetic")
