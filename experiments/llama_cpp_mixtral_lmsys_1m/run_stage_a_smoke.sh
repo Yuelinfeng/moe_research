@@ -30,10 +30,10 @@ if [[ -z "$OUTPUT_DIR" ]]; then
   exit 2
 fi
 
-MODEL_REPO_ID="${MODEL_REPO_ID:-TheBloke/Mixtral-8x7B-Instruct-v0.1-GGUF}"
-MODEL_FILENAME="${MODEL_FILENAME:-mixtral-8x7b-instruct-v0.1.Q8_0.gguf}"
-MODEL_DIR="${MODEL_DIR:-/root/autodl-tmp/llama-models/mixtral-8x7b-instruct-v0.1}"
-MODEL_EXPECTED_SIZE_BYTES="${MODEL_EXPECTED_SIZE_BYTES:-49624262592}"
+MODEL_REPO_ID="${MODEL_REPO_ID:-mradermacher/Mixtral-8x7B-Instruct-v0.1-GGUF}"
+MODEL_FILENAME="${MODEL_FILENAME:-Mixtral-8x7B-Instruct-v0.1.Q8_0.gguf}"
+MODEL_DIR="${MODEL_DIR:-/root/autodl-tmp/llama-models/mradermacher-mixtral-8x7b-instruct-v0.1}"
+MODEL_EXPECTED_SIZE_BYTES="${MODEL_EXPECTED_SIZE_BYTES:-49626320288}"
 MODEL_PATH="$MODEL_DIR/$MODEL_FILENAME"
 SERVER_HOST="${SERVER_HOST:-127.0.0.1}"
 SERVER_PORT="${SERVER_PORT:-18080}"

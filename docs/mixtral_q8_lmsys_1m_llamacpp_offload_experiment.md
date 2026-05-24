@@ -38,15 +38,24 @@ tipping point where KV Cache becomes the dominant incremental GPU-memory consume
 Target file:
 
 ```text
-TheBloke/Mixtral-8x7B-Instruct-v0.1-GGUF
-mixtral-8x7b-instruct-v0.1.Q8_0.gguf
+mradermacher/Mixtral-8x7B-Instruct-v0.1-GGUF
+Mixtral-8x7B-Instruct-v0.1.Q8_0.gguf
 ```
 
 Verified file size by Hugging Face file headers:
 
 ```text
-Q8_0 bytes: 49,624,262,592 bytes
+Q8_0 bytes: 49,626,320,288 bytes
 Q8_0 size: 49.62 GB decimal, about 46.22 GiB
+```
+
+Compatibility note:
+
+```text
+Do not use the older TheBloke Q8_0 GGUF with the current llama.cpp build.
+It uses legacy per-expert tensor names such as blk.0.ffn_down.0.weight, while
+the current loader expects stacked expert tensors such as blk.0.ffn_down_exps.weight.
+The mradermacher Q8_0 file is selected as the current-format GGUF source.
 ```
 
 For comparison:
@@ -335,7 +344,7 @@ Start with the most conservative stable configuration for model feasibility:
 ```bash
 export LD_LIBRARY_PATH=/root/autodl-tmp/llama.cpp/build-cuda-env/bin:/usr/local/cuda-12.4/lib64:${LD_LIBRARY_PATH:-}
 
-MODEL=/root/autodl-tmp/llama-models/mixtral-8x7b-instruct-v0.1/mixtral-8x7b-instruct-v0.1.Q8_0.gguf
+MODEL=/root/autodl-tmp/llama-models/mradermacher-mixtral-8x7b-instruct-v0.1/Mixtral-8x7B-Instruct-v0.1.Q8_0.gguf
 LLAMA_SERVER=/root/autodl-tmp/llama.cpp/build-cuda-env/bin/llama-server
 
 $LLAMA_SERVER \
@@ -882,7 +891,7 @@ The run is considered valid only if:
 Tasks:
 
 ```text
-1. Download Q8_0 GGUF to /root/autodl-tmp/llama-models/mixtral-8x7b-instruct-v0.1/.
+1. Download Q8_0 GGUF to /root/autodl-tmp/llama-models/mradermacher-mixtral-8x7b-instruct-v0.1/.
 2. Compute sha256sum.
 3. Start llama-server with -cmoe.
 4. Send 3 simple requests.
@@ -991,7 +1000,7 @@ Then run Stage A on the remote server before attempting any dataset-scale run.
 ```text
 Mixtral paper: https://arxiv.org/abs/2401.04088
 Mixtral HF model: https://huggingface.co/mistralai/Mixtral-8x7B-Instruct-v0.1
-Mixtral GGUF files: https://huggingface.co/TheBloke/Mixtral-8x7B-Instruct-v0.1-GGUF
+Mixtral GGUF files: https://huggingface.co/mradermacher/Mixtral-8x7B-Instruct-v0.1-GGUF
 LMSYS-Chat-1M dataset: https://huggingface.co/datasets/lmsys/lmsys-chat-1m
 llama.cpp server docs: https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md
 ```
