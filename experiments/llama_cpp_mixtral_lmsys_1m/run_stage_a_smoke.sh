@@ -13,6 +13,7 @@ Environment overrides:
   SERVER_PORT
   USE_PROXY=1 PROXY_URL=http://127.0.0.1:7890
   SKIP_MODEL_DOWNLOAD=1
+  MAX_DOWNLOAD_ATTEMPTS=20
 EOF
 }
 
@@ -48,6 +49,10 @@ if [[ "${USE_PROXY:-0}" == "1" && -n "${PROXY_URL:-}" ]]; then
   export HTTP_PROXY="$PROXY_URL"
   export HTTPS_PROXY="$PROXY_URL"
 fi
+
+# The large Mixtral Q8_0 file is more reliable on this server through regular
+# resumable HTTP than through Xet's high-concurrency path.
+export HF_HUB_DISABLE_XET="${HF_HUB_DISABLE_XET:-1}"
 
 LLAMA_CPP_CONDA_ENV="${LLAMA_CPP_CONDA_ENV:-/root/autodl-tmp/conda-envs/llama-cpp}"
 if [[ -f /root/miniconda3/bin/activate && -d "$LLAMA_CPP_CONDA_ENV" ]]; then
@@ -101,7 +106,20 @@ if [[ ! -f "$MODEL_PATH" ]]; then
     exit 20
   fi
   echo "Downloading model $MODEL_REPO_ID/$MODEL_FILENAME"
-  download_model
+  max_attempts="${MAX_DOWNLOAD_ATTEMPTS:-20}"
+  for attempt in $(seq 1 "$max_attempts"); do
+    echo "download_attempt=$attempt/$max_attempts"
+    if download_model; then
+      break
+    fi
+    if [[ "$attempt" == "$max_attempts" ]]; then
+      echo "model download failed after $max_attempts attempts" >&2
+      exit 22
+    fi
+    sleep_seconds=$((attempt * 10))
+    echo "download attempt failed; retrying after ${sleep_seconds}s" >&2
+    sleep "$sleep_seconds"
+  done
 fi
 
 actual_size="$(stat -c '%s' "$MODEL_PATH")"
