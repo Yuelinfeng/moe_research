@@ -314,7 +314,7 @@ kv_cache_bytes_estimated =
   live_tokens * n_layers * n_kv_heads * head_dim * 2(K,V) * bytes_per_kv_element
 ```
 
-For Mixtral-like 32-layer, hidden-size 4096, 32-head attention with f16 KV, this is approximately:
+For Mixtral-like 32-layer, 8 KV heads, head_dim 128, and f16 KV, this is approximately:
 
 ```text
 about 128 KiB per live token
@@ -567,14 +567,17 @@ Required fields when available:
 ```text
 timestamp
 slot_id
-slot_state
-slot_prompt_tokens
-slot_predicted_tokens
+slot_is_processing
+slot_task_id
 slot_n_ctx
-slot_n_past
-slot_cache_tokens
-server_prompt_tokens_total
-server_generation_tokens_total
+slot_prompt_tokens
+slot_prompt_tokens_processed
+slot_prompt_tokens_cache
+slot_next_n_decoded
+slot_next_n_remain
+slot_live_tokens_estimated
+slot_kv_cache_bytes_estimated
+slot_kv_cache_mib_estimated
 ```
 
 ### 7.6 `summarize_results.py`

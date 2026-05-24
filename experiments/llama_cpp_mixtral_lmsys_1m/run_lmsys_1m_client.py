@@ -99,21 +99,50 @@ def get_slots(base_url: str) -> dict | list | None:
         return None
 
 
-def count_live_tokens(slots_payload) -> int:
-    if slots_payload is None:
+def normalize_slots(payload):
+    if payload is None:
+        return []
+    if isinstance(payload, dict):
+        if isinstance(payload.get("slots"), list):
+            return payload["slots"]
+        if isinstance(payload.get("data"), list):
+            return payload["data"]
+    if isinstance(payload, list):
+        return payload
+    return []
+
+
+def int_or_zero(value) -> int:
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
         return 0
-    slots = slots_payload
-    if isinstance(slots_payload, dict):
-        slots = slots_payload.get("slots", slots_payload.get("data", []))
+
+
+def first_next_token(slot: dict) -> dict:
+    next_token = slot.get("next_token")
+    if isinstance(next_token, list) and next_token and isinstance(next_token[0], dict):
+        return next_token[0]
+    if isinstance(next_token, dict):
+        return next_token
+    return {}
+
+
+def estimate_slot_live_tokens(slot: dict) -> int:
+    next_token = first_next_token(slot)
+    n_prompt = int_or_zero(slot.get("n_prompt_tokens", slot.get("prompt_tokens", 0)))
+    n_processed = int_or_zero(slot.get("n_prompt_tokens_processed", 0))
+    n_cache = int_or_zero(slot.get("n_prompt_tokens_cache", 0))
+    n_decoded = int_or_zero(next_token.get("n_decoded", slot.get("predicted_tokens", 0)))
+    legacy = int_or_zero(slot.get("n_past", slot.get("cache_tokens", slot.get("n_tokens", 0))))
+    return max(n_prompt, n_processed + n_decoded, n_cache + n_processed + n_decoded, legacy)
+
+
+def count_live_tokens(slots_payload) -> int:
     total = 0
-    if isinstance(slots, list):
-        for slot in slots:
-            if isinstance(slot, dict):
-                value = slot.get("n_past", slot.get("cache_tokens", slot.get("n_tokens", 0)))
-                try:
-                    total += int(value)
-                except (TypeError, ValueError):
-                    pass
+    for slot in normalize_slots(slots_payload):
+        if isinstance(slot, dict):
+            total += estimate_slot_live_tokens(slot)
     return total
 
 

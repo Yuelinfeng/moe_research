@@ -55,12 +55,52 @@ def read_system_peak(path: Path) -> dict:
     return peaks
 
 
+def int_or_zero(value) -> int:
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def kv_cache_bytes_for_tokens(live_tokens: int, layers: int, kv_heads: int, head_dim: int, kv_bytes: int) -> int:
+    return live_tokens * layers * kv_heads * head_dim * 2 * kv_bytes
+
+
+def read_slot_peaks(path: Path) -> dict:
+    peaks = {
+        "slot_peak_live_tokens": 0,
+        "slot_kv_cache_bytes_estimated_peak": 0,
+    }
+    if not path.exists():
+        return peaks
+
+    with path.open("r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            live_tokens = int_or_zero(row.get("slot_live_tokens_estimated"))
+            kv_cache_bytes = int_or_zero(row.get("slot_kv_cache_bytes_estimated"))
+
+            # Compatibility with older CSVs generated before slot_live_tokens_estimated existed.
+            if not live_tokens:
+                live_tokens = max(
+                    int_or_zero(row.get("slot_n_past")),
+                    int_or_zero(row.get("slot_cache_tokens")),
+                    int_or_zero(row.get("slot_prompt_tokens")),
+                )
+
+            peaks["slot_peak_live_tokens"] = max(peaks["slot_peak_live_tokens"], live_tokens)
+            peaks["slot_kv_cache_bytes_estimated_peak"] = max(
+                peaks["slot_kv_cache_bytes_estimated_peak"], kv_cache_bytes
+            )
+    return peaks
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-dir", required=True)
     parser.add_argument("--output-dir", default="")
     parser.add_argument("--layers", type=int, default=32)
-    parser.add_argument("--kv-heads", type=int, default=32)
+    parser.add_argument("--kv-heads", type=int, default=8)
     parser.add_argument("--head-dim", type=int, default=128)
     parser.add_argument("--kv-bytes", type=int, default=2, help="f16=2, q8_0=1, q4_0~1 for coarse estimate")
     args = parser.parse_args()
@@ -75,9 +115,16 @@ def main() -> int:
     failed = [r for r in rows if r.get("status") != "ok"]
     latencies = [float(r["latency_ms"]) for r in ok if r.get("latency_ms") is not None]
     tps = [float(r["tokens_per_second"]) for r in ok if r.get("tokens_per_second")]
-    live_tokens = [max(int(r.get("live_tokens_before") or 0), int(r.get("live_tokens_after") or 0)) for r in ok]
-    peak_live_tokens = max(live_tokens) if live_tokens else 0
-    kv_cache_bytes_peak = peak_live_tokens * args.layers * args.kv_heads * args.head_dim * 2 * args.kv_bytes
+    request_live_tokens = [
+        max(int_or_zero(r.get("live_tokens_before")), int_or_zero(r.get("live_tokens_after"))) for r in ok
+    ]
+    request_peak_live_tokens = max(request_live_tokens) if request_live_tokens else 0
+    slot_peaks = read_slot_peaks(run_dir / "monitor" / "llama_slots_summary.csv")
+    peak_live_tokens = max(request_peak_live_tokens, slot_peaks["slot_peak_live_tokens"])
+    kv_cache_bytes_peak = max(
+        slot_peaks["slot_kv_cache_bytes_estimated_peak"],
+        kv_cache_bytes_for_tokens(peak_live_tokens, args.layers, args.kv_heads, args.head_dim, args.kv_bytes),
+    )
 
     summary = {
         "num_requests_total": len(rows),
@@ -88,9 +135,18 @@ def main() -> int:
         "latency_p99_ms": percentile(latencies, 99),
         "tokens_per_second_avg": statistics.mean(tps) if tps else None,
         "tokens_per_second_p50": percentile(tps, 50),
+        "request_peak_live_tokens": request_peak_live_tokens,
+        "slot_peak_live_tokens": slot_peaks["slot_peak_live_tokens"],
         "peak_live_tokens": peak_live_tokens,
         "kv_cache_bytes_estimated_peak": kv_cache_bytes_peak,
         "kv_cache_mib_estimated_peak": kv_cache_bytes_peak / (1024 * 1024),
+        "kv_cache_estimate_config": {
+            "layers": args.layers,
+            "kv_heads": args.kv_heads,
+            "head_dim": args.head_dim,
+            "kv_bytes": args.kv_bytes,
+            "bytes_per_token": kv_cache_bytes_for_tokens(1, args.layers, args.kv_heads, args.head_dim, args.kv_bytes),
+        },
     }
     summary.update(read_system_peak(run_dir / "monitor" / "system_samples.csv"))
 

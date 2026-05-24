@@ -42,7 +42,7 @@
   "metrics": {
     "sampleIntervalSeconds": 1.0,
     "mixtralLayers": 32,
-    "mixtralKvHeads": 32,
+    "mixtralKvHeads": 8,
     "mixtralHeadDim": 128
   }
 }
