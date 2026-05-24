@@ -9,6 +9,9 @@ Environment overrides:
   MODEL_PATH
   MODEL_EXPECTED_SIZE_BYTES=49626320288
   DATASET_DIR=/root/autodl-tmp/datasets/lmsys-chat-1m-stage-b-100
+  DATASET_SELECT_MODE=first
+  DATASET_SCAN_LIMIT=0
+  DATASET_FORCE_REBUILD=0
   SERVER_PORT=18080
   PROMPT_LIMIT=100
   MAX_TOKENS=64
@@ -41,6 +44,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODEL_PATH="${MODEL_PATH:-/root/autodl-tmp/llama-models/mradermacher-mixtral-8x7b-instruct-v0.1/Mixtral-8x7B-Instruct-v0.1.Q8_0.gguf}"
 MODEL_EXPECTED_SIZE_BYTES="${MODEL_EXPECTED_SIZE_BYTES:-49626320288}"
 DATASET_DIR="${DATASET_DIR:-/root/autodl-tmp/datasets/lmsys-chat-1m-stage-b-100}"
+DATASET_SELECT_MODE="${DATASET_SELECT_MODE:-first}"
+DATASET_SCAN_LIMIT="${DATASET_SCAN_LIMIT:-0}"
+DATASET_FORCE_REBUILD="${DATASET_FORCE_REBUILD:-0}"
 SERVER_HOST="${SERVER_HOST:-127.0.0.1}"
 SERVER_PORT="${SERVER_PORT:-18080}"
 PROMPT_LIMIT="${PROMPT_LIMIT:-100}"
@@ -80,11 +86,16 @@ fi
 python -m pip install -q -U datasets pyarrow >/dev/null
 
 SHARD_DIR="$DATASET_DIR/shards"
+if [[ "$DATASET_FORCE_REBUILD" == "1" ]]; then
+  rm -rf "$DATASET_DIR"
+fi
 if ! find "$SHARD_DIR" -maxdepth 1 -name '*.jsonl' -print -quit 2>/dev/null | grep -q .; then
   python "$SCRIPT_DIR/prepare_lmsys_chat1m.py" \
     --output-dir "$DATASET_DIR" \
     --limit "$PROMPT_LIMIT" \
-    --shard-size "$PROMPT_LIMIT" | tee "$OUTPUT_DIR/logs/prepare_dataset.log"
+    --shard-size "$PROMPT_LIMIT" \
+    --select-mode "$DATASET_SELECT_MODE" \
+    --scan-limit "$DATASET_SCAN_LIMIT" | tee "$OUTPUT_DIR/logs/prepare_dataset.log"
 fi
 
 DEFAULT_CONFIGS=$(cat <<'EOF'
@@ -154,6 +165,8 @@ while IFS='|' read -r CONFIG_NAME MOE_PLACEMENT KV_OFFLOAD CACHE_TYPE_K CACHE_TY
   "config_name": "$CONFIG_NAME",
   "model_path": "$MODEL_PATH",
   "dataset_dir": "$DATASET_DIR",
+  "dataset_select_mode": "$DATASET_SELECT_MODE",
+  "dataset_scan_limit": $DATASET_SCAN_LIMIT,
   "server_url": "http://$SERVER_HOST:$SERVER_PORT",
   "moe_placement": "$MOE_PLACEMENT",
   "kv_offload": "$KV_OFFLOAD",

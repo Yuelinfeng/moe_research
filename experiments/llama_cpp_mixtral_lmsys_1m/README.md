@@ -15,4 +15,15 @@ Stage A downloads or reuses the Mixtral Q8_0 GGUF, starts `llama-server`, polls 
 
 Stage B prepares a fixed 100-prompt LMSYS sample and runs the default Expert/KV sweep across GPU KV, CPU KV, KV q8, and the first `-np 2` pressure points.
 
+For KV pressure rather than batch-one baseline, run Stage B with the pressure config and longest-prompt selection:
+
+```bash
+env DATASET_DIR=/root/autodl-tmp/datasets/lmsys-chat-1m-stage-b-longest-100 \
+  DATASET_SELECT_MODE=longest \
+  DATASET_SCAN_LIMIT=20000 \
+  DATASET_FORCE_REBUILD=1 \
+  CONFIGS_FILE=experiments/llama_cpp_mixtral_lmsys_1m/stage_b_kv_pressure.config \
+  bash experiments/llama_cpp_mixtral_lmsys_1m/run_stage_b_100_sweep.sh --output-dir "$RUN_DIR"
+```
+
 The full 1M run should only be started after Stage A and the 100/1k/10k calibration stages are stable.
