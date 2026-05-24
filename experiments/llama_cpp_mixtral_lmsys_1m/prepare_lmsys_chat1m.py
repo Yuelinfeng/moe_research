@@ -2,6 +2,8 @@
 import argparse
 import hashlib
 import json
+import os
+import sys
 from pathlib import Path
 
 
@@ -84,7 +86,8 @@ def main() -> int:
     }
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(manifest, ensure_ascii=False, indent=2))
-    return 0
+    sys.stdout.flush()
+    os._exit(0)
 
 
 if __name__ == "__main__":

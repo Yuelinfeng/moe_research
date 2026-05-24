@@ -14,6 +14,7 @@ Environment overrides:
   MAX_TOKENS=64
   METRICS_INTERVAL_SECONDS=1
   MONITOR_INTERVAL_SECONDS=1
+  HF_ENDPOINT=https://hf-mirror.com
   USE_PROXY=1 PROXY_URL=http://127.0.0.1:7890
   CONFIGS_FILE=/path/to/configs.txt
 
@@ -49,6 +50,7 @@ TOP_P="${TOP_P:-1.0}"
 METRICS_INTERVAL_SECONDS="${METRICS_INTERVAL_SECONDS:-1}"
 MONITOR_INTERVAL_SECONDS="${MONITOR_INTERVAL_SECONDS:-1}"
 LLAMA_CPP_CONDA_ENV="${LLAMA_CPP_CONDA_ENV:-/root/autodl-tmp/conda-envs/llama-cpp}"
+export HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
 
 mkdir -p "$OUTPUT_DIR"/{configs,summaries,logs}
 
