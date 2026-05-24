@@ -1,0 +1,48 @@
+{
+  "model": {
+    "repoId": "TheBloke/Mixtral-8x7B-Instruct-v0.1-GGUF",
+    "filename": "mixtral-8x7b-instruct-v0.1.Q8_0.gguf",
+    "localDir": "/root/autodl-tmp/llama-models/mixtral-8x7b-instruct-v0.1",
+    "expectedSizeBytes": 49624262592
+  },
+  "dataset": {
+    "repoId": "lmsys/lmsys-chat-1m",
+    "split": "train",
+    "expectedRows": 1000000,
+    "shardSize": 10000,
+    "outputDir": "/root/autodl-tmp/datasets/lmsys-chat-1m-prepared"
+  },
+  "llamaCpp": {
+    "root": "/root/autodl-tmp/llama.cpp",
+    "buildDir": "/root/autodl-tmp/llama.cpp/build-cuda-env",
+    "condaEnv": "/root/autodl-tmp/conda-envs/llama-cpp",
+    "cudaLibDir": "/usr/local/cuda-12.4/lib64"
+  },
+  "server": {
+    "host": "127.0.0.1",
+    "port": 18080,
+    "ctxSize": 2048,
+    "parallelSlots": 1,
+    "batchSize": 512,
+    "ubatchSize": 256,
+    "gpuLayers": 99,
+    "moePlacement": "-cmoe",
+    "kvOffload": true,
+    "cacheTypeK": "f16",
+    "cacheTypeV": "f16",
+    "flashAttention": "auto"
+  },
+  "generation": {
+    "maxNewTokens": 64,
+    "temperature": 0.0,
+    "topP": 1.0,
+    "seed": 42,
+    "storeOutputText": false
+  },
+  "metrics": {
+    "sampleIntervalSeconds": 1.0,
+    "mixtralLayers": 32,
+    "mixtralKvHeads": 32,
+    "mixtralHeadDim": 128
+  }
+}
