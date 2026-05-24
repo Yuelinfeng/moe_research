@@ -66,32 +66,81 @@ def kv_cache_bytes_for_tokens(live_tokens: int, layers: int, kv_heads: int, head
     return live_tokens * layers * kv_heads * head_dim * 2 * kv_bytes
 
 
-def read_slot_peaks(path: Path) -> dict:
+def normalize_slots(payload):
+    if payload is None:
+        return []
+    if isinstance(payload, dict):
+        if isinstance(payload.get("slots"), list):
+            return payload["slots"]
+        if isinstance(payload.get("data"), list):
+            return payload["data"]
+    if isinstance(payload, list):
+        return payload
+    return []
+
+
+def first_next_token(slot: dict) -> dict:
+    next_token = slot.get("next_token")
+    if isinstance(next_token, list) and next_token and isinstance(next_token[0], dict):
+        return next_token[0]
+    if isinstance(next_token, dict):
+        return next_token
+    return {}
+
+
+def estimate_slot_live_tokens(slot: dict) -> int:
+    next_token = first_next_token(slot)
+    n_prompt = int_or_zero(slot.get("n_prompt_tokens", slot.get("prompt_tokens", 0)))
+    n_processed = int_or_zero(slot.get("n_prompt_tokens_processed", 0))
+    n_cache = int_or_zero(slot.get("n_prompt_tokens_cache", 0))
+    n_decoded = int_or_zero(next_token.get("n_decoded", slot.get("predicted_tokens", 0)))
+    legacy = int_or_zero(slot.get("n_past", slot.get("cache_tokens", slot.get("n_tokens", 0))))
+    return max(n_prompt, n_processed + n_decoded, n_cache + n_processed + n_decoded, legacy)
+
+
+def update_slot_peaks(peaks: dict, live_tokens: int, kv_cache_bytes: int) -> None:
+    peaks["slot_peak_live_tokens"] = max(peaks["slot_peak_live_tokens"], live_tokens)
+    peaks["slot_kv_cache_bytes_estimated_peak"] = max(peaks["slot_kv_cache_bytes_estimated_peak"], kv_cache_bytes)
+
+
+def read_slot_peaks(run_dir: Path, layers: int, kv_heads: int, head_dim: int, kv_bytes: int) -> dict:
     peaks = {
         "slot_peak_live_tokens": 0,
         "slot_kv_cache_bytes_estimated_peak": 0,
     }
-    if not path.exists():
-        return peaks
+    csv_path = run_dir / "monitor" / "llama_slots_summary.csv"
+    if csv_path.exists():
+        with csv_path.open("r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                live_tokens = int_or_zero(row.get("slot_live_tokens_estimated"))
+                kv_cache_bytes = int_or_zero(row.get("slot_kv_cache_bytes_estimated"))
 
-    with path.open("r", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            live_tokens = int_or_zero(row.get("slot_live_tokens_estimated"))
-            kv_cache_bytes = int_or_zero(row.get("slot_kv_cache_bytes_estimated"))
+                # Compatibility with older CSVs generated before slot_live_tokens_estimated existed.
+                if not live_tokens:
+                    live_tokens = max(
+                        int_or_zero(row.get("slot_n_past")),
+                        int_or_zero(row.get("slot_cache_tokens")),
+                        int_or_zero(row.get("slot_prompt_tokens")),
+                    )
+                if live_tokens and not kv_cache_bytes:
+                    kv_cache_bytes = kv_cache_bytes_for_tokens(live_tokens, layers, kv_heads, head_dim, kv_bytes)
+                update_slot_peaks(peaks, live_tokens, kv_cache_bytes)
 
-            # Compatibility with older CSVs generated before slot_live_tokens_estimated existed.
-            if not live_tokens:
-                live_tokens = max(
-                    int_or_zero(row.get("slot_n_past")),
-                    int_or_zero(row.get("slot_cache_tokens")),
-                    int_or_zero(row.get("slot_prompt_tokens")),
-                )
-
-            peaks["slot_peak_live_tokens"] = max(peaks["slot_peak_live_tokens"], live_tokens)
-            peaks["slot_kv_cache_bytes_estimated_peak"] = max(
-                peaks["slot_kv_cache_bytes_estimated_peak"], kv_cache_bytes
-            )
+    raw_path = run_dir / "monitor" / "llama_slots_samples.jsonl"
+    if raw_path.exists():
+        with raw_path.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                record = json.loads(line)
+                for slot in normalize_slots(record.get("payload")):
+                    if not isinstance(slot, dict):
+                        continue
+                    live_tokens = estimate_slot_live_tokens(slot)
+                    kv_cache_bytes = kv_cache_bytes_for_tokens(live_tokens, layers, kv_heads, head_dim, kv_bytes)
+                    update_slot_peaks(peaks, live_tokens, kv_cache_bytes)
     return peaks
 
 
@@ -119,7 +168,7 @@ def main() -> int:
         max(int_or_zero(r.get("live_tokens_before")), int_or_zero(r.get("live_tokens_after"))) for r in ok
     ]
     request_peak_live_tokens = max(request_live_tokens) if request_live_tokens else 0
-    slot_peaks = read_slot_peaks(run_dir / "monitor" / "llama_slots_summary.csv")
+    slot_peaks = read_slot_peaks(run_dir, args.layers, args.kv_heads, args.head_dim, args.kv_bytes)
     peak_live_tokens = max(request_peak_live_tokens, slot_peaks["slot_peak_live_tokens"])
     kv_cache_bytes_peak = max(
         slot_peaks["slot_kv_cache_bytes_estimated_peak"],
