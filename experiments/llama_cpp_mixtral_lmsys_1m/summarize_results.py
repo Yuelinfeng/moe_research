@@ -98,21 +98,27 @@ def estimate_slot_live_tokens(slot: dict) -> int:
     return max(n_prompt, n_processed + n_decoded, n_cache + n_processed + n_decoded, legacy)
 
 
-def update_slot_peaks(peaks: dict, live_tokens: int, kv_cache_bytes: int) -> None:
+def update_slot_peaks(peaks: dict, live_tokens: int, kv_cache_bytes: int, active_slots: int) -> None:
     peaks["slot_peak_live_tokens"] = max(peaks["slot_peak_live_tokens"], live_tokens)
     peaks["slot_kv_cache_bytes_estimated_peak"] = max(peaks["slot_kv_cache_bytes_estimated_peak"], kv_cache_bytes)
+    peaks["slot_peak_active_slots"] = max(peaks["slot_peak_active_slots"], active_slots)
 
 
 def read_slot_peaks(run_dir: Path, layers: int, kv_heads: int, head_dim: int, kv_bytes: int) -> dict:
     peaks = {
         "slot_peak_live_tokens": 0,
         "slot_kv_cache_bytes_estimated_peak": 0,
+        "slot_peak_active_slots": 0,
+        "slot_single_peak_live_tokens": 0,
+        "slot_single_kv_cache_bytes_estimated_peak": 0,
     }
     csv_path = run_dir / "monitor" / "llama_slots_summary.csv"
     if csv_path.exists():
+        timestamp_totals: dict[str, dict[str, int]] = {}
         with csv_path.open("r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
+                ts = row.get("timestamp") or ""
                 live_tokens = int_or_zero(row.get("slot_live_tokens_estimated"))
                 kv_cache_bytes = int_or_zero(row.get("slot_kv_cache_bytes_estimated"))
 
@@ -125,7 +131,17 @@ def read_slot_peaks(run_dir: Path, layers: int, kv_heads: int, head_dim: int, kv
                     )
                 if live_tokens and not kv_cache_bytes:
                     kv_cache_bytes = kv_cache_bytes_for_tokens(live_tokens, layers, kv_heads, head_dim, kv_bytes)
-                update_slot_peaks(peaks, live_tokens, kv_cache_bytes)
+                peaks["slot_single_peak_live_tokens"] = max(peaks["slot_single_peak_live_tokens"], live_tokens)
+                peaks["slot_single_kv_cache_bytes_estimated_peak"] = max(
+                    peaks["slot_single_kv_cache_bytes_estimated_peak"], kv_cache_bytes
+                )
+                total = timestamp_totals.setdefault(ts, {"live_tokens": 0, "kv_cache_bytes": 0, "active_slots": 0})
+                total["live_tokens"] += live_tokens
+                total["kv_cache_bytes"] += kv_cache_bytes
+                if live_tokens:
+                    total["active_slots"] += 1
+        for total in timestamp_totals.values():
+            update_slot_peaks(peaks, total["live_tokens"], total["kv_cache_bytes"], total["active_slots"])
 
     raw_path = run_dir / "monitor" / "llama_slots_samples.jsonl"
     if raw_path.exists():
@@ -135,12 +151,23 @@ def read_slot_peaks(run_dir: Path, layers: int, kv_heads: int, head_dim: int, kv
                 if not line:
                     continue
                 record = json.loads(line)
+                total_live_tokens = 0
+                total_kv_cache_bytes = 0
+                active_slots = 0
                 for slot in normalize_slots(record.get("payload")):
                     if not isinstance(slot, dict):
                         continue
                     live_tokens = estimate_slot_live_tokens(slot)
                     kv_cache_bytes = kv_cache_bytes_for_tokens(live_tokens, layers, kv_heads, head_dim, kv_bytes)
-                    update_slot_peaks(peaks, live_tokens, kv_cache_bytes)
+                    peaks["slot_single_peak_live_tokens"] = max(peaks["slot_single_peak_live_tokens"], live_tokens)
+                    peaks["slot_single_kv_cache_bytes_estimated_peak"] = max(
+                        peaks["slot_single_kv_cache_bytes_estimated_peak"], kv_cache_bytes
+                    )
+                    total_live_tokens += live_tokens
+                    total_kv_cache_bytes += kv_cache_bytes
+                    if live_tokens:
+                        active_slots += 1
+                update_slot_peaks(peaks, total_live_tokens, total_kv_cache_bytes, active_slots)
     return peaks
 
 
@@ -186,6 +213,8 @@ def main() -> int:
         "tokens_per_second_p50": percentile(tps, 50),
         "request_peak_live_tokens": request_peak_live_tokens,
         "slot_peak_live_tokens": slot_peaks["slot_peak_live_tokens"],
+        "slot_peak_active_slots": slot_peaks["slot_peak_active_slots"],
+        "slot_single_peak_live_tokens": slot_peaks["slot_single_peak_live_tokens"],
         "peak_live_tokens": peak_live_tokens,
         "kv_cache_bytes_estimated_peak": kv_cache_bytes_peak,
         "kv_cache_mib_estimated_peak": kv_cache_bytes_peak / (1024 * 1024),
